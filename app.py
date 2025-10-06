@@ -32,7 +32,8 @@ def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free
     iv = option['impliedVolatility'].iloc[0]
     price = option['lastPrice'].iloc[0]
     exp_date_dt = pd.to_datetime(expiration_date)
-    today = pd.Timestamp.now(tz='America/New_York')
+    # FIX: Use a timezone-naive 'today' to match the expiration date
+    today = pd.Timestamp.now() 
     days_to_exp = (exp_date_dt - today).days
     t = days_to_exp / 365.0
 
@@ -68,7 +69,8 @@ def simulate_option_value_with_drift(ticker, expiration_date, strike_price, risk
     iv = option_data['impliedVolatility'].iloc[0]
 
     exp_date_dt = pd.to_datetime(expiration_date)
-    today = pd.Timestamp.now(tz='America/New_York')
+    # FIX: Use a timezone-naive 'today' to match the expiration date
+    today = pd.Timestamp.now()
     initial_days = (exp_date_dt - today).days
     
     sim_days, sim_option_values = [], []
@@ -101,7 +103,8 @@ def plot_projected_stock_price(ticker, expiration_date):
     last_date = hist.index[-1]
 
     exp_date_dt = pd.to_datetime(expiration_date)
-    today = pd.Timestamp.now(tz='America/New_York')
+    # FIX: Use a timezone-naive 'today' to match the expiration date
+    today = pd.Timestamp.now()
     days_to_project = (exp_date_dt - today).days
 
     projected_prices = []
