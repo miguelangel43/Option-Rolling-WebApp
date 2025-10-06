@@ -124,11 +124,11 @@ def plot_projected_stock_price(ticker, expiration_date):
 
 # --- Sidebar for User Inputs ---
 st.sidebar.header("Your Option Position")
-TICKER = st.sidebar.text_input("Ticker", "AAPL").upper()
-CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2025-11-21")
-CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=175, step=1)
-ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-01-16")
-Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=0.005, format="%.4f")
+TICKER = st.sidebar.text_input("Ticker", "BABA").upper()
+CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2025-12-19")
+CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=220, step=1)
+ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-02-20")
+Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=0.0, format="%.4f")
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.04 for 4%)", value=0.042, format="%.3f")
 
 # --- Main App Logic ---
