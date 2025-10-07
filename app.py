@@ -21,57 +21,42 @@ def get_stock_price(ticker):
     stock = yf.Ticker(ticker)
     return stock.history(period='1d')['Close'].iloc[0]
     
+# MODIFIED FUNCTION FOR FUNDAMENTALS
 @st.cache_data
 def get_stock_fundamentals(ticker_str):
     """Fetches key fundamental metrics for a stock ticker."""
     stock = yf.Ticker(ticker_str)
     info = stock.info
-    metrics = {
-        'Company Name': info.get('shortName', 'N/A'), 'Sector': info.get('sector', 'N/A'),
-        'Market Cap': info.get('marketCap', 'N/A'), 'Enterprise Value': info.get('enterpriseValue', 'N/A'),
-        'Trailing P/E Ratio': info.get('trailingPE', 'N/A'), 'Forward P/E Ratio': info.get('forwardPE', 'N/A'),
-        'Price to Book': info.get('priceToBook', 'N/A'),
-        'Total Assets': stock.balance_sheet.loc['Total Assets'].iloc[0] if not stock.balance_sheet.empty else 'N/A',
-        'Total Debt': info.get('totalDebt', 'N/A'), '52-Week High': info.get('fiftyTwoWeekHigh', 'N/A'),
-        '52-Week Low': info.get('fiftyTwoWeekLow', 'N/A'), 'Beta': info.get('beta', 'N/A')
-    }
-    for key in ['Market Cap', 'Enterprise Value', 'Total Assets', 'Total Debt']:
-        if isinstance(metrics[key], (int, float)): metrics[key] = f"${metrics[key]:,}"
-    for key in ['Trailing P/E Ratio', 'Forward P/E Ratio', 'Price to Book', 'Beta']:
-        if isinstance(metrics[key], (int, float)): metrics[key] = f"{metrics[key]:.2f}"
-    df_fundamentals = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value'])
-    return df_fundamentals
 
-# NEW CORE FORECASTING FUNCTION
-@st.cache_data
-def forecast_stock_price(ticker, days_to_project):
-    """Forecasts stock price trend with ARIMA and volatility with GARCH."""
-    hist = yf.Ticker(ticker).history(period='2y')['Close']
+    metrics = {
+        'Company Name': info.get('shortName', 'N/A'),
+        'Sector': info.get('sector', 'N/A'),
+        'Market Cap': info.get('marketCap', 'N/A'),
+        'Enterprise Value': info.get('enterpriseValue', 'N/A'),
+        'Trailing P/E Ratio': info.get('trailingPE', 'N/A'),
+        'Forward P/E Ratio': info.get('forwardPE', 'N/A'),
+        'Price to Book': info.get('priceToBook', 'N/A'),
+        'Total Assets': stock.balance_sheet.loc['Total Assets'].iloc[0] if not stock.balance_sheet.empty and 'Total Assets' in stock.balance_sheet.index else 'N/A',
+        'Total Debt': info.get('totalDebt', 'N/A'),
+        '52-Week High': info.get('fiftyTwoWeekHigh', 'N/A'),
+        '52-Week Low': info.get('fiftyTwoWeekLow', 'N/A'),
+        'Beta': info.get('beta', 'N/A')
+    }
+
+    # Format large numbers into billions for readability
+    for key in ['Market Cap', 'Enterprise Value', 'Total Assets', 'Total Debt']:
+        if isinstance(metrics[key], (int, float)):
+            value_in_billions = metrics[key] / 1_000_000_000
+            metrics[key] = f"${value_in_billions:.2f}B"
     
-    # Fit an ARIMA model for the trend
-    arima_model = pm.auto_arima(hist, start_p=1, start_q=1, max_p=3, max_q=3, m=1,
-                                start_P=0, seasonal=False, d=1, D=0, trace=False,
-                                error_action='ignore', suppress_warnings=True, stepwise=True)
-    
-    # Forecast the trend
-    forecast, conf_int = arima_model.predict(n_periods=days_to_project, return_conf_int=True, alpha=0.32) # 68% CI
-    
-    # Fit a GARCH model for volatility
-    returns = hist.pct_change().dropna() * 100
-    garch_model = arch_model(returns, vol='Garch', p=1, q=1).fit(disp='off')
-    
-    # Forecast volatility
-    forecast_horizon = days_to_project
-    forecasts = garch_model.forecast(horizon=forecast_horizon)
-    cond_vol = np.sqrt(forecasts.variance.values[-1, :]) / 100
-    
-    # Create confidence intervals using GARCH volatility
-    forecast_std = cond_vol * np.sqrt(np.arange(1, forecast_horizon + 1))
-    upper_bound = forecast + forecast_std * forecast
-    lower_bound = forecast - forecast_std * forecast
-    
-    future_dates = pd.date_range(start=hist.index[-1] + pd.Timedelta(days=1), periods=days_to_project)
-    return hist, forecast, upper_bound, lower_bound, future_dates
+    # Format ratios to 2 decimal places
+    for key in ['Trailing P/E Ratio', 'Forward P/E Ratio', 'Price to Book', 'Beta']:
+            if isinstance(metrics[key], (int, float)):
+                metrics[key] = f"{metrics[key]:.2f}"
+
+    # Create a DataFrame and set the 'Metric' column as the index
+    df_fundamentals = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value']).set_index('Metric')
+    return df_fundamentals
 
 @st.cache_data
 def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
@@ -117,7 +102,31 @@ def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_fr
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
-# REFACTORED SIMULATION FUNCTION
+@st.cache_data
+def forecast_stock_price(ticker, days_to_project):
+    """Forecasts stock price trend with ARIMA and volatility with GARCH."""
+    hist = yf.Ticker(ticker).history(period='2y')['Close']
+    
+    arima_model = pm.auto_arima(hist, start_p=1, start_q=1, max_p=3, max_q=3, m=1,
+                                start_P=0, seasonal=False, d=1, D=0, trace=False,
+                                error_action='ignore', suppress_warnings=True, stepwise=True)
+    
+    forecast, conf_int = arima_model.predict(n_periods=days_to_project, return_conf_int=True, alpha=0.32) # 68% CI
+    
+    returns = hist.pct_change().dropna() * 100
+    garch_model = arch_model(returns, vol='Garch', p=1, q=1).fit(disp='off')
+    
+    forecast_horizon = days_to_project
+    forecasts = garch_model.forecast(horizon=forecast_horizon)
+    cond_vol = np.sqrt(forecasts.variance.values[-1, :]) / 100
+    
+    forecast_std = cond_vol * np.sqrt(np.arange(1, forecast_horizon + 1))
+    upper_bound = forecast + forecast_std * forecast
+    lower_bound = forecast - forecast_std * forecast
+    
+    future_dates = pd.date_range(start=hist.index[-1] + pd.Timedelta(days=1), periods=days_to_project)
+    return hist, forecast, upper_bound, lower_bound, future_dates
+
 @st.cache_data
 def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, risk_free_rate, q, forecast_path):
     """Simulates the option's value over the ARIMA forecast path."""
@@ -146,7 +155,6 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
-# REFACTORED PLOTTING FUNCTION
 @st.cache_data
 def plot_projected_stock_price(ticker, expiration_date):
     """Plots historical price and the ARIMA/GARCH forecast."""

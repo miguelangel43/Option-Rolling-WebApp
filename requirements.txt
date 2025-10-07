@@ -3,4 +3,5 @@ yfinance
 pandas
 numpy
 py_vollib
+pmdarima
 plotly
