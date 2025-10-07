@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 from py_vollib.black_scholes_merton import black_scholes_merton
 from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, vega
-import pmdarima as pm
+from statsmodels.tsa.api import Holt
 from arch import arch_model
 
 # --- App Configuration ---
@@ -21,13 +21,11 @@ def get_stock_price(ticker):
     stock = yf.Ticker(ticker)
     return stock.history(period='1d')['Close'].iloc[0]
     
-# MODIFIED FUNCTION FOR FUNDAMENTALS
 @st.cache_data
 def get_stock_fundamentals(ticker_str):
     """Fetches key fundamental metrics for a stock ticker."""
     stock = yf.Ticker(ticker_str)
     info = stock.info
-
     metrics = {
         'Company Name': info.get('shortName', 'N/A'),
         'Sector': info.get('sector', 'N/A'),
@@ -42,21 +40,45 @@ def get_stock_fundamentals(ticker_str):
         '52-Week Low': info.get('fiftyTwoWeekLow', 'N/A'),
         'Beta': info.get('beta', 'N/A')
     }
-
-    # Format large numbers into billions for readability
     for key in ['Market Cap', 'Enterprise Value', 'Total Assets', 'Total Debt']:
         if isinstance(metrics[key], (int, float)):
             value_in_billions = metrics[key] / 1_000_000_000
             metrics[key] = f"${value_in_billions:.2f}B"
-    
-    # Format ratios to 2 decimal places
     for key in ['Trailing P/E Ratio', 'Forward P/E Ratio', 'Price to Book', 'Beta']:
             if isinstance(metrics[key], (int, float)):
                 metrics[key] = f"{metrics[key]:.2f}"
-
-    # Create a DataFrame and set the 'Metric' column as the index
     df_fundamentals = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value']).set_index('Metric')
     return df_fundamentals
+
+# REVISED CORE FORECASTING FUNCTION
+@st.cache_data
+def forecast_stock_price(ticker, days_to_project):
+    """Forecasts stock price trend with Holt's model and volatility with GARCH."""
+    hist = yf.Ticker(ticker).history(period='2y')['Close']
+    
+    # Fit Holt's Linear Trend Model instead of ARIMA
+    holt_model = Holt(hist, initialization_method="estimated").fit()
+    forecast = holt_model.forecast(days_to_project)
+    
+    # GARCH model for volatility (remains the same)
+    returns = hist.pct_change().dropna() * 100
+    garch_model = arch_model(returns, vol='Garch', p=1, q=1).fit(disp='off')
+    
+    forecast_horizon = days_to_project
+    garch_forecasts = garch_model.forecast(horizon=forecast_horizon)
+    cond_vol = np.sqrt(garch_forecasts.variance.values[-1, :]) / 100
+    
+    # Create confidence intervals using forecasted GARCH volatility
+    # This calculation assumes volatility scales with the square root of time
+    forecast_std_dev = cond_vol * np.sqrt(np.arange(1, forecast_horizon + 1))
+    
+    # Apply the forecasted standard deviation to the forecasted price
+    upper_bound = forecast * (1 + forecast_std_dev)
+    lower_bound = forecast * (1 - forecast_std_dev)
+    
+    future_dates = pd.date_range(start=hist.index[-1] + pd.Timedelta(days=1), periods=days_to_project)
+    return hist, forecast, upper_bound, lower_bound, future_dates
+
 
 @st.cache_data
 def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
@@ -103,33 +125,8 @@ def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_fr
     return fig
 
 @st.cache_data
-def forecast_stock_price(ticker, days_to_project):
-    """Forecasts stock price trend with ARIMA and volatility with GARCH."""
-    hist = yf.Ticker(ticker).history(period='2y')['Close']
-    
-    arima_model = pm.auto_arima(hist, start_p=1, start_q=1, max_p=3, max_q=3, m=1,
-                                start_P=0, seasonal=False, d=1, D=0, trace=False,
-                                error_action='ignore', suppress_warnings=True, stepwise=True)
-    
-    forecast, conf_int = arima_model.predict(n_periods=days_to_project, return_conf_int=True, alpha=0.32) # 68% CI
-    
-    returns = hist.pct_change().dropna() * 100
-    garch_model = arch_model(returns, vol='Garch', p=1, q=1).fit(disp='off')
-    
-    forecast_horizon = days_to_project
-    forecasts = garch_model.forecast(horizon=forecast_horizon)
-    cond_vol = np.sqrt(forecasts.variance.values[-1, :]) / 100
-    
-    forecast_std = cond_vol * np.sqrt(np.arange(1, forecast_horizon + 1))
-    upper_bound = forecast + forecast_std * forecast
-    lower_bound = forecast - forecast_std * forecast
-    
-    future_dates = pd.date_range(start=hist.index[-1] + pd.Timedelta(days=1), periods=days_to_project)
-    return hist, forecast, upper_bound, lower_bound, future_dates
-
-@st.cache_data
 def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, risk_free_rate, q, forecast_path):
-    """Simulates the option's value over the ARIMA forecast path."""
+    """Simulates the option's value over the forecast path."""
     stock = yf.Ticker(ticker)
     opt_chain = stock.option_chain(expiration_date).calls
     option_data = opt_chain[opt_chain['strike'] == strike_price]
@@ -150,25 +147,25 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
         
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_option_values, mode='lines', name='Projected Option Value', line=dict(color='blue')))
-    fig.update_layout(title=f'<b>Projected Option Value based on ARIMA Forecast</b>',
+    fig.update_layout(title=f'<b>Projected Option Value based on Trend Forecast</b>',
                       xaxis_title='Days Until Expiration', yaxis_title='Option Price ($)',
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
 @st.cache_data
 def plot_projected_stock_price(ticker, expiration_date):
-    """Plots historical price and the ARIMA/GARCH forecast."""
+    """Plots historical price and the Holt/GARCH forecast."""
     today = pd.Timestamp.now()
     days_to_project = (pd.to_datetime(expiration_date) - today).days
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist.index, y=hist, mode='lines', name='Historical Price', line=dict(color='royalblue')))
-    fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name='ARIMA Forecast', line=dict(color='darkorange')))
+    fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name="Holt's Trend Forecast", line=dict(color='darkorange')))
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
     
-    fig.update_layout(title=f'<b>{ticker} Price Forecast with ARIMA Trend and GARCH Volatility</b>',
+    fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
                       xaxis_title='Date', yaxis_title='Stock Price ($)',
                       template='plotly_white', legend=dict(x=0.01, y=0.98))
     return fig, forecast

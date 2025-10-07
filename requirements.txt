@@ -2,6 +2,7 @@ streamlit
 yfinance
 pandas
 numpy
-py_vollib
-pmdarima
 plotly
+py_vollib
+statsmodels
+arch
