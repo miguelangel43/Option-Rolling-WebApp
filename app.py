@@ -21,6 +21,7 @@ def get_stock_price(ticker):
     stock = yf.Ticker(ticker)
     return stock.history(period='1d')['Close'].iloc[0]
     
+# MODIFIED FUNCTION FOR HORIZONTAL FUNDAMENTALS
 @st.cache_data
 def get_stock_fundamentals(ticker_str):
     """Fetches key fundamental metrics for a stock ticker."""
@@ -28,57 +29,47 @@ def get_stock_fundamentals(ticker_str):
     info = stock.info
     metrics = {
         'Company Name': info.get('shortName', 'N/A'),
-        'Sector': info.get('sector', 'N/A'),
         'Market Cap': info.get('marketCap', 'N/A'),
         'Enterprise Value': info.get('enterpriseValue', 'N/A'),
-        'Trailing P/E Ratio': info.get('trailingPE', 'N/A'),
-        'Forward P/E Ratio': info.get('forwardPE', 'N/A'),
+        'Trailing P/E': info.get('trailingPE', 'N/A'),
+        'Forward P/E': info.get('forwardPE', 'N/A'),
         'Price to Book': info.get('priceToBook', 'N/A'),
-        'Total Assets': stock.balance_sheet.loc['Total Assets'].iloc[0] if not stock.balance_sheet.empty and 'Total Assets' in stock.balance_sheet.index else 'N/A',
-        'Total Debt': info.get('totalDebt', 'N/A'),
-        '52-Week High': info.get('fiftyTwoWeekHigh', 'N/A'),
-        '52-Week Low': info.get('fiftyTwoWeekLow', 'N/A'),
+        'Dividend Yield': info.get('dividendYield', 'N/A'),
         'Beta': info.get('beta', 'N/A')
     }
-    for key in ['Market Cap', 'Enterprise Value', 'Total Assets', 'Total Debt']:
+    # Format large numbers into billions for readability
+    for key in ['Market Cap', 'Enterprise Value']:
         if isinstance(metrics[key], (int, float)):
             value_in_billions = metrics[key] / 1_000_000_000
             metrics[key] = f"${value_in_billions:.2f}B"
-    for key in ['Trailing P/E Ratio', 'Forward P/E Ratio', 'Price to Book', 'Beta']:
-            if isinstance(metrics[key], (int, float)):
-                metrics[key] = f"{metrics[key]:.2f}"
-    df_fundamentals = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value']).set_index('Metric')
-    return df_fundamentals
+    # Format ratios
+    for key in ['Trailing P/E', 'Forward P/E', 'Price to Book', 'Beta']:
+        if isinstance(metrics[key], (int, float)):
+            metrics[key] = f"{metrics[key]:.2f}"
+    # Format dividend yield as percentage
+    if isinstance(metrics['Dividend Yield'], (int, float)):
+        metrics['Dividend Yield'] = f"{metrics['Dividend Yield'] * 100:.2f}%"
+        
+    # Create a horizontal DataFrame
+    df_fundamentals = pd.DataFrame([metrics])
+    return df_fundamentals.set_index('Company Name')
 
-# REVISED CORE FORECASTING FUNCTION
+
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
     hist = yf.Ticker(ticker).history(period='2y')['Close']
-    
-    # Fit Holt's Linear Trend Model instead of ARIMA
     holt_model = Holt(hist, initialization_method="estimated").fit()
     forecast = holt_model.forecast(days_to_project)
-    
-    # GARCH model for volatility (remains the same)
     returns = hist.pct_change().dropna() * 100
     garch_model = arch_model(returns, vol='Garch', p=1, q=1).fit(disp='off')
-    
-    forecast_horizon = days_to_project
-    garch_forecasts = garch_model.forecast(horizon=forecast_horizon)
+    garch_forecasts = garch_model.forecast(horizon=days_to_project)
     cond_vol = np.sqrt(garch_forecasts.variance.values[-1, :]) / 100
-    
-    # Create confidence intervals using forecasted GARCH volatility
-    # This calculation assumes volatility scales with the square root of time
-    forecast_std_dev = cond_vol * np.sqrt(np.arange(1, forecast_horizon + 1))
-    
-    # Apply the forecasted standard deviation to the forecasted price
+    forecast_std_dev = cond_vol * np.sqrt(np.arange(1, days_to_project + 1))
     upper_bound = forecast * (1 + forecast_std_dev)
     lower_bound = forecast * (1 - forecast_std_dev)
-    
     future_dates = pd.date_range(start=hist.index[-1] + pd.Timedelta(days=1), periods=days_to_project)
     return hist, forecast, upper_bound, lower_bound, future_dates
-
 
 @st.cache_data
 def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
@@ -89,7 +80,6 @@ def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free
     if option.empty:
         st.warning(f"Option not found for {ticker} {strike_price}C {expiration_date}")
         return None
-        
     iv = option['impliedVolatility'].iloc[0]
     price = option['lastPrice'].iloc[0]
     exp_date_dt = pd.to_datetime(expiration_date)
@@ -106,11 +96,11 @@ def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free
 
 @st.cache_data
 def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
-    """Visualizes the acceleration of Theta as expiration approaches."""
+    """Visualizes the static acceleration of Theta as expiration approaches."""
     stock = yf.Ticker(ticker)
     opt_chain = stock.option_chain(expiration_date).calls
     option = opt_chain[opt_chain['strike'] == strike_price]
-    if option.empty: return go.Figure().update_layout(title_text="Option data not found for Theta Decay plot.")
+    if option.empty: return go.Figure().update_layout(title_text="Option data not found for static Theta Decay plot.")
     iv = option['impliedVolatility'].iloc[0]
     exp_date_dt = pd.to_datetime(expiration_date)
     today = pd.Timestamp.now()
@@ -119,10 +109,41 @@ def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_fr
     time_to_exp = days_remaining / 365.0
     thetas = [theta('c', stock_price, strike_price, t, risk_free_rate, iv, q) / 365 for t in time_to_exp]
     fig = go.Figure(data=go.Scatter(x=-days_remaining, y=thetas, mode='lines', line=dict(color='red')))
-    fig.update_layout(title=f'<b>Theta Decay Curve for Current Option</b><br>(Assuming Price and IV Remain Constant)',
+    fig.update_layout(title=f'<b>Static Theta Decay Curve for Current Option</b><br>(Assuming Constant Price and IV)',
                       xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
+
+# NEW DYNAMIC THETA PLOT
+@st.cache_data
+def plot_dynamic_theta_decay(ticker, expiration_date, strike_price, risk_free_rate, q, forecast_path):
+    """Simulates and plots theta decay along the forecasted price path."""
+    stock = yf.Ticker(ticker)
+    opt_chain = stock.option_chain(expiration_date).calls
+    option_data = opt_chain[opt_chain['strike'] == strike_price]
+    if option_data.empty: return go.Figure().update_layout(title_text="Option data not found for dynamic Theta Decay plot.")
+    iv = option_data['impliedVolatility'].iloc[0]
+    exp_date_dt = pd.to_datetime(expiration_date)
+    today = pd.Timestamp.now()
+    initial_days = (exp_date_dt - today).days
+    
+    sim_days, sim_thetas = [], []
+    
+    for i, days_left in enumerate(range(initial_days, 1, -1)):
+        if i >= len(forecast_path): break
+        t = days_left / 365.0
+        stock_price = forecast_path.iloc[i]
+        sim_days.append(days_left)
+        daily_theta = theta('c', stock_price, strike_price, t, risk_free_rate, iv, q) / 365
+        sim_thetas.append(daily_theta)
+        
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_thetas, mode='lines', name='Projected Theta', line=dict(color='purple')))
+    fig.update_layout(title=f'<b>Dynamic Theta Decay along Forecasted Path</b><br>(For Current Option)',
+                      xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
+                      xaxis=dict(autorange="reversed"), template='plotly_white')
+    return fig
+
 
 @st.cache_data
 def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, risk_free_rate, q, forecast_path):
@@ -134,9 +155,7 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
     exp_date_dt = pd.to_datetime(expiration_date)
     today = pd.Timestamp.now()
     initial_days = (exp_date_dt - today).days
-    
     sim_days, sim_option_values = [], []
-    
     for i, days_left in enumerate(range(initial_days, 1, -1)):
         if i >= len(forecast_path): break
         t = days_left / 365.0
@@ -144,7 +163,6 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
         sim_days.append(days_left)
         option_price = black_scholes_merton('c', stock_price, strike_price, t, risk_free_rate, iv, q)
         sim_option_values.append(option_price)
-        
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_option_values, mode='lines', name='Projected Option Value', line=dict(color='blue')))
     fig.update_layout(title=f'<b>Projected Option Value based on Trend Forecast</b>',
@@ -158,13 +176,11 @@ def plot_projected_stock_price(ticker, expiration_date):
     today = pd.Timestamp.now()
     days_to_project = (pd.to_datetime(expiration_date) - today).days
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
-
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist.index, y=hist, mode='lines', name='Historical Price', line=dict(color='royalblue')))
     fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name="Holt's Trend Forecast", line=dict(color='darkorange')))
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
-    
     fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
                       xaxis_title='Date', yaxis_title='Stock Price ($)',
                       template='plotly_white', legend=dict(x=0.01, y=0.98))
@@ -200,14 +216,23 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         st.dataframe(df_fundamentals)
 
         st.subheader("Visualizations")
-        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION)
+        # Forecast now extends to the rolled position's maturity
+        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, ROLL_TO_EXPIRATION)
         st.plotly_chart(fig_stock_price, use_container_width=True)
 
-        fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path)
+        # Slice the forecast path for simulations of the current option
+        days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
+        forecast_path_current = forecast_path[:days_current_exp]
+        
+        fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
         st.plotly_chart(fig_option_value, use_container_width=True)
         
-        fig_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
-        st.plotly_chart(fig_theta, use_container_width=True)
+        # Display the new dynamic theta plot
+        fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+        st.plotly_chart(fig_dynamic_theta, use_container_width=True)
+        
+        fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        st.plotly_chart(fig_static_theta, use_container_width=True)
         
     except Exception as e:
         st.error(f"An error occurred. Please check your inputs. Error: {e}")
