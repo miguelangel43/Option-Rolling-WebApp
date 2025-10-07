@@ -32,7 +32,6 @@ def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free
     iv = option['impliedVolatility'].iloc[0]
     price = option['lastPrice'].iloc[0]
     exp_date_dt = pd.to_datetime(expiration_date)
-    # FIX: Use a timezone-naive 'today' to match the expiration date
     today = pd.Timestamp.now() 
     days_to_exp = (exp_date_dt - today).days
     t = days_to_exp / 365.0
@@ -55,6 +54,37 @@ def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free
         'Gamma/Theta Ratio': abs(g / th) if th != 0 else 0
     }
 
+# NEWLY ADDED FUNCTION
+@st.cache_data
+def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
+    """Visualizes the acceleration of Theta as expiration approaches."""
+    stock = yf.Ticker(ticker)
+    opt_chain = stock.option_chain(expiration_date).calls
+    option = opt_chain[opt_chain['strike'] == strike_price]
+    if option.empty:
+        return go.Figure().update_layout(title_text="Option data not found for Theta Decay plot.")
+        
+    iv = option['impliedVolatility'].iloc[0]
+    exp_date_dt = pd.to_datetime(expiration_date)
+    today = pd.Timestamp.now()
+    initial_days = (exp_date_dt - today).days
+
+    days_remaining = np.arange(max(1, initial_days), 1, -1)
+    time_to_exp = days_remaining / 365.0
+    
+    thetas = [theta('c', stock_price, strike_price, t, risk_free_rate, iv, q) / 365 for t in time_to_exp]
+
+    fig = go.Figure(data=go.Scatter(x=-days_remaining, y=thetas, mode='lines', line=dict(color='red')))
+    fig.update_layout(
+        title=f'<b>Theta Decay Curve for Current Option</b><br>(Assuming Price and IV Remain Constant)',
+        xaxis_title='Days Until Expiration',
+        yaxis_title='Daily Theta ($)',
+        xaxis=dict(autorange="reversed"),
+        template='plotly_white'
+    )
+    return fig
+
+
 @st.cache_data
 def simulate_option_value_with_drift(ticker, expiration_date, strike_price, risk_free_rate, q):
     """Simulates the option's value over time, factoring in historical price drift."""
@@ -69,7 +99,6 @@ def simulate_option_value_with_drift(ticker, expiration_date, strike_price, risk
     iv = option_data['impliedVolatility'].iloc[0]
 
     exp_date_dt = pd.to_datetime(expiration_date)
-    # FIX: Use a timezone-naive 'today' to match the expiration date
     today = pd.Timestamp.now()
     initial_days = (exp_date_dt - today).days
     
@@ -85,7 +114,7 @@ def simulate_option_value_with_drift(ticker, expiration_date, strike_price, risk
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_option_values, mode='lines', name='Projected Option Value', line=dict(color='blue')))
     fig.update_layout(
-        title=f'<b>Projected Option Value for {ticker} {strike_price}C</b><br>(with Daily Price Drift of {daily_drift:.4%})',
+        title=f'<b>Projected Option Value for Current Option</b><br>(with Daily Price Drift of {daily_drift:.4%})',
         xaxis_title='Days Until Expiration', yaxis_title='Option Price ($)',
         xaxis=dict(autorange="reversed"), template='plotly_white'
     )
@@ -103,7 +132,6 @@ def plot_projected_stock_price(ticker, expiration_date):
     last_date = hist.index[-1]
 
     exp_date_dt = pd.to_datetime(expiration_date)
-    # FIX: Use a timezone-naive 'today' to match the expiration date
     today = pd.Timestamp.now()
     days_to_project = (exp_date_dt - today).days
 
@@ -134,33 +162,36 @@ ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2
 Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=0.0, format="%.4f")
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.04 for 4%)", value=0.042, format="%.3f")
 
+st.sidebar.button("Update and Analyze")
+
 # --- Main App Logic ---
-if st.sidebar.button("Update and Analyze"):
-    with st.spinner('Fetching data and running analysis...'):
-        try:
-            # --- 1. Display Comparison Table ---
-            st.subheader("Greeks Comparison")
-            S = get_stock_price(TICKER)
-            st.metric(f"Current {TICKER} Price", f"${S:.2f}")
+with st.spinner('Fetching data and running analysis...'):
+    try:
+        # --- 1. Display Comparison Table ---
+        st.subheader("Greeks Comparison")
+        S = get_stock_price(TICKER)
+        st.metric(f"Current {TICKER} Price", f"${S:.2f}")
 
-            current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
-            roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
 
-            if current_option_stats and roll_to_option_stats:
-                df_compare = pd.DataFrame([current_option_stats, roll_to_option_stats])
-                df_compare.index = ['Current Position', 'Rolled Position']
-                st.dataframe(df_compare.round(4))
+        if current_option_stats and roll_to_option_stats:
+            df_compare = pd.DataFrame([current_option_stats, roll_to_option_stats])
+            df_compare.index = ['Current Position', 'Rolled Position']
+            st.dataframe(df_compare.round(4))
 
-            # --- 2. Display Charts ---
-            st.subheader("Visualizations")
-            
-            fig_option_value = simulate_option_value_with_drift(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q)
-            st.plotly_chart(fig_option_value, use_container_width=True)
-            
-            fig_stock_price = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION)
-            st.plotly_chart(fig_stock_price, use_container_width=True)
+        # --- 2. Display Charts ---
+        st.subheader("Visualizations")
+        
+        # ADDED THETA DECAY PLOT
+        fig_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        st.plotly_chart(fig_theta, use_container_width=True)
+        
+        fig_option_value = simulate_option_value_with_drift(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q)
+        st.plotly_chart(fig_option_value, use_container_width=True)
+        
+        fig_stock_price = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION)
+        st.plotly_chart(fig_stock_price, use_container_width=True)
 
-        except Exception as e:
-            st.error(f"An error occurred. Please check your inputs. Error: {e}")
-else:
-    st.info("Enter your option details in the sidebar and click 'Update and Analyze'.")
+    except Exception as e:
+        st.error(f"An error occurred. Please check your inputs. Error: {e}")
