@@ -8,6 +8,7 @@ from py_vollib.black_scholes_merton import black_scholes_merton
 from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, vega
 from statsmodels.tsa.api import Holt
 from arch import arch_model
+from datetime import datetime
 
 # --- App Configuration ---
 st.set_page_config(page_title="Option Rolling Analyzer", layout="wide")
@@ -16,12 +17,19 @@ st.title("Option Rolling Analytics")
 # --- Analysis Functions with Caching for Speed ---
 
 @st.cache_data
-def get_stock_price(ticker):
-    """Fetches the current stock price."""
-    stock = yf.Ticker(ticker)
-    return stock.history(period='1d')['Close'].iloc[0]
-    
-# MODIFIED FUNCTION FOR HORIZONTAL FUNDAMENTALS
+def get_basic_info(ticker):
+    """Fetches minimal info needed for sidebar defaults."""
+    stock_info = yf.Ticker(ticker).info
+    price = stock_info.get('currentPrice', 0)
+    div_yield = stock_info.get('dividendYield', 0.0)
+    return price, div_yield
+
+@st.cache_data
+def get_stock_news(ticker):
+    """Fetches recent news headlines."""
+    news = yf.Ticker(ticker).news
+    return news
+
 @st.cache_data
 def get_stock_fundamentals(ticker_str):
     """Fetches key fundamental metrics for a stock ticker."""
@@ -35,25 +43,28 @@ def get_stock_fundamentals(ticker_str):
         'Forward P/E': info.get('forwardPE', 'N/A'),
         'Price to Book': info.get('priceToBook', 'N/A'),
         'Dividend Yield': info.get('dividendYield', 'N/A'),
+        'Ex-Dividend Date': info.get('exDividendDate', 'N/A'),
+        'Earnings Date': info.get('earningsTimestamp', 'N/A'),
         'Beta': info.get('beta', 'N/A')
     }
-    # Format large numbers into billions for readability
+    # Format large numbers into billions
     for key in ['Market Cap', 'Enterprise Value']:
         if isinstance(metrics[key], (int, float)):
-            value_in_billions = metrics[key] / 1_000_000_000
-            metrics[key] = f"${value_in_billions:.2f}B"
+            metrics[key] = f"${metrics[key] / 1_000_000_000:.2f}B"
     # Format ratios
     for key in ['Trailing P/E', 'Forward P/E', 'Price to Book', 'Beta']:
         if isinstance(metrics[key], (int, float)):
             metrics[key] = f"{metrics[key]:.2f}"
-    # Format dividend yield as percentage
+    # Format dividend yield as percentage (f-string .% formatter is correct)
     if isinstance(metrics['Dividend Yield'], (int, float)):
-        metrics['Dividend Yield'] = f"{metrics['Dividend Yield'] * 100:.2f}%"
-        
-    # Create a horizontal DataFrame
-    df_fundamentals = pd.DataFrame([metrics])
-    return df_fundamentals.set_index('Company Name')
+        metrics['Dividend Yield'] = f"{metrics['Dividend Yield']:.2%}"
+    # Format timestamp dates
+    for key in ['Ex-Dividend Date', 'Earnings Date']:
+         if isinstance(metrics[key], (int, float)):
+            metrics[key] = datetime.fromtimestamp(metrics[key]).strftime('%Y-%m-%d')
 
+    df_fundamentals = pd.DataFrame([metrics]).set_index('Company Name')
+    return df_fundamentals
 
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
@@ -114,7 +125,6 @@ def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_fr
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
-# NEW DYNAMIC THETA PLOT
 @st.cache_data
 def plot_dynamic_theta_decay(ticker, expiration_date, strike_price, risk_free_rate, q, forecast_path):
     """Simulates and plots theta decay along the forecasted price path."""
@@ -126,9 +136,7 @@ def plot_dynamic_theta_decay(ticker, expiration_date, strike_price, risk_free_ra
     exp_date_dt = pd.to_datetime(expiration_date)
     today = pd.Timestamp.now()
     initial_days = (exp_date_dt - today).days
-    
     sim_days, sim_thetas = [], []
-    
     for i, days_left in enumerate(range(initial_days, 1, -1)):
         if i >= len(forecast_path): break
         t = days_left / 365.0
@@ -136,14 +144,12 @@ def plot_dynamic_theta_decay(ticker, expiration_date, strike_price, risk_free_ra
         sim_days.append(days_left)
         daily_theta = theta('c', stock_price, strike_price, t, risk_free_rate, iv, q) / 365
         sim_thetas.append(daily_theta)
-        
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_thetas, mode='lines', name='Projected Theta', line=dict(color='purple')))
     fig.update_layout(title=f'<b>Dynamic Theta Decay along Forecasted Path</b><br>(For Current Option)',
                       xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
-
 
 @st.cache_data
 def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, risk_free_rate, q, forecast_path):
@@ -189,23 +195,36 @@ def plot_projected_stock_price(ticker, expiration_date):
 # --- Sidebar for User Inputs ---
 st.sidebar.header("Your Option Position")
 TICKER = st.sidebar.text_input("Ticker", "BABA").upper()
+
+# Fetch info here to use for defaults
+current_price, default_div_yield = get_basic_info(TICKER)
+
 CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2025-12-19")
 CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=220, step=1)
 ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-02-20")
-Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=0.0, format="%.4f")
+Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=default_div_yield, format="%.4f")
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.04 for 4%)", value=0.042, format="%.3f")
 
 st.sidebar.button("Update and Analyze")
 
 # --- Main App Logic ---
+st.metric(f"Current {TICKER} Price", f"${current_price:.2f}")
+
+# Display News Headlines
+with st.expander(f"Latest News for {TICKER}"):
+    news = get_stock_news(TICKER)
+    if news:
+        for i, article in enumerate(news[:5]): # Show top 5
+            st.markdown(f"**[{article['title']}]({article['link']})** - *{article['publisher']}*")
+            if i < 4: st.markdown("---")
+    else:
+        st.write("No news found.")
+
 with st.spinner('Fetching data and running advanced models... This may take a moment.'):
     try:
-        S = get_stock_price(TICKER)
-        st.metric(f"Current {TICKER} Price", f"${S:.2f}")
-
         st.subheader("Greeks Comparison")
-        current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
-        roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, current_price, RISK_FREE_RATE, Q)
+        roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, current_price, RISK_FREE_RATE, Q)
         if current_option_stats and roll_to_option_stats:
             df_compare = pd.DataFrame([current_option_stats, roll_to_option_stats])
             df_compare.index = ['Current Position', 'Rolled Position']
@@ -216,22 +235,19 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         st.dataframe(df_fundamentals)
 
         st.subheader("Visualizations")
-        # Forecast now extends to the rolled position's maturity
         fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, ROLL_TO_EXPIRATION)
         st.plotly_chart(fig_stock_price, use_container_width=True)
 
-        # Slice the forecast path for simulations of the current option
         days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
         forecast_path_current = forecast_path[:days_current_exp]
         
         fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
         st.plotly_chart(fig_option_value, use_container_width=True)
         
-        # Display the new dynamic theta plot
         fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
         st.plotly_chart(fig_dynamic_theta, use_container_width=True)
         
-        fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, current_price, RISK_FREE_RATE, Q)
         st.plotly_chart(fig_static_theta, use_container_width=True)
         
     except Exception as e:
