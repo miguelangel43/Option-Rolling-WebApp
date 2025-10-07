@@ -9,7 +9,7 @@ from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta
 
 # --- App Configuration ---
 st.set_page_config(page_title="Option Rolling Analyzer", layout="wide")
-st.title("📈 Option Rolling Analytics")
+st.title("Option Rolling Analytics")
 
 # --- Analysis Functions with Caching for Speed ---
 
@@ -18,6 +18,43 @@ def get_stock_price(ticker):
     """Fetches the current stock price."""
     stock = yf.Ticker(ticker)
     return stock.history(period='1d')['Close'].iloc[0]
+    
+# NEWLY ADDED FUNCTION FOR FUNDAMENTALS
+@st.cache_data
+def get_stock_fundamentals(ticker_str):
+    """Fetches key fundamental metrics for a stock ticker."""
+    stock = yf.Ticker(ticker_str)
+    info = stock.info
+
+    # Define the metrics we want to display and get them safely from the info dict
+    metrics = {
+        'Company Name': info.get('shortName', 'N/A'),
+        'Sector': info.get('sector', 'N/A'),
+        'Market Cap': info.get('marketCap', 'N/A'),
+        'Enterprise Value': info.get('enterpriseValue', 'N/A'),
+        'Trailing P/E Ratio': info.get('trailingPE', 'N/A'),
+        'Forward P/E Ratio': info.get('forwardPE', 'N/A'),
+        'Price to Book': info.get('priceToBook', 'N/A'),
+        'Total Assets': stock.balance_sheet.loc['Total Assets'].iloc[0] if not stock.balance_sheet.empty else 'N/A',
+        'Total Debt': info.get('totalDebt', 'N/A'),
+        '52-Week High': info.get('fiftyTwoWeekHigh', 'N/A'),
+        '52-Week Low': info.get('fiftyTwoWeekLow', 'N/A'),
+        'Beta': info.get('beta', 'N/A')
+    }
+
+    # Format large numbers for readability
+    for key in ['Market Cap', 'Enterprise Value', 'Total Assets', 'Total Debt']:
+        if isinstance(metrics[key], (int, float)):
+            metrics[key] = f"${metrics[key]:,}"
+    
+    # Format ratios to 2 decimal places
+    for key in ['Trailing P/E Ratio', 'Forward P/E Ratio', 'Price to Book', 'Beta']:
+            if isinstance(metrics[key], (int, float)):
+                metrics[key] = f"{metrics[key]:.2f}"
+
+    # Create a DataFrame for clean display
+    df_fundamentals = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value'])
+    return df_fundamentals
 
 @st.cache_data
 def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
@@ -54,7 +91,6 @@ def analyze_option(ticker, expiration_date, strike_price, stock_price, risk_free
         'Gamma/Theta Ratio': abs(g / th) if th != 0 else 0
     }
 
-# NEWLY ADDED FUNCTION
 @st.cache_data
 def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_free_rate, q):
     """Visualizes the acceleration of Theta as expiration approaches."""
@@ -167,11 +203,11 @@ st.sidebar.button("Update and Analyze")
 # --- Main App Logic ---
 with st.spinner('Fetching data and running analysis...'):
     try:
-        # --- 1. Display Comparison Table ---
-        st.subheader("Greeks Comparison")
+        # --- 1. Display Price and Comparison Table ---
         S = get_stock_price(TICKER)
         st.metric(f"Current {TICKER} Price", f"${S:.2f}")
 
+        st.subheader("Greeks Comparison")
         current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
         roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
 
@@ -180,10 +216,14 @@ with st.spinner('Fetching data and running analysis...'):
             df_compare.index = ['Current Position', 'Rolled Position']
             st.dataframe(df_compare.round(4))
 
-        # --- 2. Display Charts ---
+        # --- 2. Display Fundamental Metrics ---
+        st.subheader(f"Fundamental Metrics for {TICKER}")
+        df_fundamentals = get_stock_fundamentals(TICKER)
+        st.dataframe(df_fundamentals)
+
+        # --- 3. Display Charts ---
         st.subheader("Visualizations")
         
-        # ADDED THETA DECAY PLOT
         fig_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
         st.plotly_chart(fig_theta, use_container_width=True)
         
