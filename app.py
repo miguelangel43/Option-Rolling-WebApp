@@ -184,7 +184,7 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
 def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, strike_price):
     """Plots historical price and the Holt/GARCH forecast with key levels."""
     today = pd.Timestamp.now()
-    days_to_project = (pd.to_datetime(roll_to_expiration) - today).days
+    days_to_project = (pd.to_datetime(current_expiration) - today).days
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
     
     fig = go.Figure()
