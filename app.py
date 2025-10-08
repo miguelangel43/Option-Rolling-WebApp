@@ -60,12 +60,10 @@ def get_stock_fundamentals(ticker_str):
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
-    hist = yf.Ticker(ticker).history(period='1y')['Close']
+    # REVERTED: Using 2 years of data for training
+    hist = yf.Ticker(ticker).history(period='2y')['Close']
     
-    # FIX for Timestamp error: Make the index timezone-naive before setting frequency
     hist.index = hist.index.tz_localize(None)
-    
-    # FIX for FutureWarning: Use .ffill() instead of .fillna(method='ffill')
     hist = hist.asfreq('D').ffill()
     
     holt_model = Holt(hist, initialization_method="estimated").fit()
