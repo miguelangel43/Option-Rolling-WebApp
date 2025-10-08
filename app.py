@@ -60,6 +60,7 @@ def get_stock_fundamentals(ticker_str):
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
     hist = yf.Ticker(ticker).history(period='1y')['Close']
+    hist = hist.asfreq('B').fillna(method='ffill')
     
     holt_model = Holt(hist, initialization_method="estimated").fit()
     forecast = holt_model.forecast(days_to_project)
@@ -171,7 +172,6 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
-# MODIFIED: Function now accepts strike and expirations to draw lines
 @st.cache_data
 def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, strike_price):
     """Plots historical price and the Holt/GARCH forecast with annotations."""
@@ -189,7 +189,6 @@ def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, s
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
     
-    # ADDED: Horizontal and vertical lines for context
     fig.add_hline(y=strike_price, line_dash="dash", line_color="grey", annotation_text=f"Strike ${strike_price}", annotation_position="bottom right")
     fig.add_vline(x=pd.to_datetime(current_expiration), line_dash="dot", line_color="green", annotation_text="Current Exp")
     fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_dash="dot", line_color="red", annotation_text="Rolled Exp")
@@ -208,15 +207,16 @@ current_price, default_div_yield = get_basic_info(TICKER)
 CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2025-12-19")
 CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=220, step=1)
 ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-02-20")
-Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=default_div_yield, format="%.4f")
-RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.04 for 4%)", value=0.042, format="%.3f")
+Q = st.sidebar.number_input("Dividend Yield (e.g., 0.015 for 1.5%)", value=default_div_yield, format="%.4f")
+# For transparency, show the fetched default value
+st.sidebar.caption(f"Fetched default yield: {default_div_yield:.4f}")
+
+RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.042 for 4.2%)", value=0.042, format="%.3f")
 
 st.sidebar.button("Update and Analyze")
 
 # --- Main App Logic ---
 st.metric(f"Current {TICKER} Price", f"${current_price:.2f}")
-
-# REMOVED: News section is gone
 
 with st.spinner('Fetching data and running advanced models... This may take a moment.'):
     try:
@@ -233,19 +233,19 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         st.dataframe(df_fundamentals)
 
         st.subheader("Visualizations")
-        # MODIFIED: Pass all necessary parameters to the plotting function
         fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION, ROLL_TO_EXPIRATION, CURRENT_STRIKE)
         
         if fig_stock_price:
             st.plotly_chart(fig_stock_price, use_container_width=True)
             days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
-            forecast_path_current = forecast_path[:days_current_exp]
+            forecast_path_current = forecast_path[:days_current_exp] if forecast_path is not None else None
             
-            fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-            st.plotly_chart(fig_option_value, use_container_width=True)
-            
-            fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-            st.plotly_chart(fig_dynamic_theta, use_container_width=True)
+            if forecast_path_current is not None and not forecast_path_current.empty:
+                fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+                st.plotly_chart(fig_option_value, use_container_width=True)
+                
+                fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+                st.plotly_chart(fig_dynamic_theta, use_container_width=True)
             
             fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, current_price, RISK_FREE_RATE, Q)
             st.plotly_chart(fig_static_theta, use_container_width=True)
