@@ -67,10 +67,10 @@ def get_stock_fundamentals(ticker_str):
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with an ARIMA model and volatility with GARCH."""
-    hist = yf.Ticker(ticker).history(period='2y')['Close']
+    hist = yf.Ticker(ticker).history(period='1y')['Close']
     
     # Use ARIMA model instead of Holt
-    arima_model = ARIMA(hist, order=(5, 0, 0))
+    arima_model = ARIMA(hist, order=(1, 0, 0))
     arima_result = arima_model.fit()
     forecast = arima_result.forecast(steps=days_to_project)
     
