@@ -70,7 +70,7 @@ def forecast_stock_price(ticker, days_to_project):
     hist = yf.Ticker(ticker).history(period='2y')['Close']
     
     # Use ARIMA model instead of Holt
-    arima_model = ARIMA(hist, order=(5, 1, 0))
+    arima_model = ARIMA(hist, order=(5, 0, 0))
     arima_result = arima_model.fit()
     forecast = arima_result.forecast(steps=days_to_project)
     
