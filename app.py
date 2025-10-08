@@ -193,8 +193,8 @@ def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, s
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
     
-    # Add vertical lines for expiration dates
-    fig.add_vline(x=pd.to_datetime(current_expiration), line_width=2, line_dash="dash", line_color="green",
+    # # Add vertical lines for expiration dates
+    fig.add_vline(x=pd.to_datetime(current_expiration).to_pydatetime(), line_width=2, line_dash="dash", line_color="green",
                   annotation_text="Current Exp", annotation_position="top right")
 
     # fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_width=2, line_dash="dash", line_color="red",
