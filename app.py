@@ -201,8 +201,7 @@ def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, s
     #               annotation_text="Roll-to Exp", annotation_position="top right")
 
     # Add horizontal line for strike price
-    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple",
-                  annotation_text=f"Strike ${strike_price}", annotation_position="bottom right")
+    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple")
 
     fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
                       xaxis_title='Date', yaxis_title='Stock Price ($)',
