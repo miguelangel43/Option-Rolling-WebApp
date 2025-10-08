@@ -28,7 +28,7 @@ def get_stock_fundamentals(ticker_str):
     info = stock.info
     
     # Safely get dates and format them
-    earnings_date_ts = info.get('earningsTimestamp')
+    earnings_date_ts = info.get('earningsTimestampStart')
     ex_dividend_date_ts = info.get('exDividendDate')
     
     earnings_date = pd.to_datetime(earnings_date_ts, unit='s').strftime('%Y-%m-%d') if earnings_date_ts else 'N/A'
