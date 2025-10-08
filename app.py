@@ -260,14 +260,12 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
         st.plotly_chart(fig_option_value, use_container_width=True)
         
-        # Display the theta plots side-by-side
-        col1, col2 = st.columns(2)
-        with col1:
-            fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-            st.plotly_chart(fig_dynamic_theta, use_container_width=True)
+        # Display the new dynamic theta plot
+        fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+        st.plotly_chart(fig_dynamic_theta, use_container_width=True)
         
-        with col2:
-            fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+        st.plotly_chart(fig_static_theta, use_container_width=True)
         
     except Exception as e:
         st.error(f"An error occurred. Please check your inputs. Error: {e}")
