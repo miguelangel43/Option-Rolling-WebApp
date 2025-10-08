@@ -22,7 +22,10 @@ def get_basic_info(ticker):
     stock_info = yf.Ticker(ticker).info
     price = stock_info.get('currentPrice', 0)
     raw_div_yield = stock_info.get('dividendYield', 0.0)
+    
+    # FIX: Correctly format the dividend yield by dividing by 100
     div_yield = raw_div_yield / 100.0 if raw_div_yield is not None else 0.0
+    
     return price, div_yield
 
 @st.cache_data
@@ -60,10 +63,12 @@ def get_stock_fundamentals(ticker_str):
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
-    # REVERTED: Using 2 years of data for training
     hist = yf.Ticker(ticker).history(period='2y')['Close']
     
+    # FIX for Timestamp error: Make the index timezone-naive before setting frequency
     hist.index = hist.index.tz_localize(None)
+    
+    # FIX for FutureWarning: Use .ffill() and set a daily frequency
     hist = hist.asfreq('D').ffill()
     
     holt_model = Holt(hist, initialization_method="estimated").fit()
@@ -193,6 +198,7 @@ def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, s
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
     
+    # ADDED: Horizontal and vertical lines for context
     fig.add_hline(y=strike_price, line_dash="dash", line_color="grey", annotation_text=f"Strike ${strike_price}", annotation_position="bottom right")
     fig.add_vline(x=pd.to_datetime(current_expiration), line_dash="dot", line_color="green", annotation_text="Current Exp")
     fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_dash="dot", line_color="red", annotation_text="Rolled Exp")
@@ -212,14 +218,15 @@ CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2
 CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=220, step=1)
 ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-02-20")
 Q = st.sidebar.number_input("Dividend Yield (e.g., 0.015 for 1.5%)", value=default_div_yield, format="%.4f")
-st.sidebar.caption(f"Fetched default yield: {default_div_yield:.4f}")
-
+# REMOVED: Caption for fetched yield is gone
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.042 for 4.2%)", value=0.042, format="%.3f")
 
 st.sidebar.button("Update and Analyze")
 
 # --- Main App Logic ---
 st.metric(f"Current {TICKER} Price", f"${current_price:.2f}")
+
+# REMOVED: News section is gone
 
 with st.spinner('Fetching data and running advanced models... This may take a moment.'):
     try:
