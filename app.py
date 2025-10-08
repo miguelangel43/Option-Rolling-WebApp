@@ -217,7 +217,7 @@ TICKER = st.sidebar.text_input("Ticker", "BABA").upper()
 try:
     ticker_info = yf.Ticker(TICKER).info
     # yfinance provides yield as a float (e.g., 0.02 for 2%)
-    default_div_yield = ticker_info.get('dividendYield', 0.0)
+    default_div_yield = ticker_info.get('dividendYield', 0.0)/100
     if default_div_yield is None:  # Handle case where yield is None
         default_div_yield = 0.0
 except Exception:
