@@ -41,7 +41,7 @@ def get_stock_fundamentals(ticker_str):
         'Trailing P/E': info.get('trailingPE', 'N/A'),
         'Forward P/E': info.get('forwardPE', 'N/A'),
         'Price to Book': info.get('priceToBook', 'N/A'),
-        'Dividend Yield': info.get('dividendYield', 'N/A'),
+        'Dividend Yield': info.get('dividendYield', 'N/A')/100,
         'Beta': info.get('beta', 'N/A'),
         'Earnings Date': earnings_date,
         'Ex-Dividend Date': ex_dividend_date,
