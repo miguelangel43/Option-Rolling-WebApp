@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from py_vollib.black_scholes_merton import black_scholes_merton
-from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, vega
+from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, veга
 from statsmodels.tsa.api import Holt
 from arch import arch_model
 from datetime import datetime
@@ -65,7 +65,6 @@ def get_stock_fundamentals(ticker_str):
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
-    # UPDATED: Using 1 year of data for training
     hist = yf.Ticker(ticker).history(period='1y')['Close']
     
     holt_model = Holt(hist, initialization_method="estimated").fit()
@@ -183,6 +182,9 @@ def plot_projected_stock_price(ticker, expiration_date):
     """Plots historical price and the Holt/GARCH forecast."""
     today = pd.Timestamp.now()
     days_to_project = (pd.to_datetime(expiration_date) - today).days
+    if days_to_project <= 0:
+        st.warning("Expiration date is in the past. Cannot generate forecast.")
+        return None, None
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist.index, y=hist, mode='lines', name='Historical Price', line=dict(color='royalblue')))
@@ -211,16 +213,19 @@ st.sidebar.button("Update and Analyze")
 # --- Main App Logic ---
 st.metric(f"Current {TICKER} Price", f"${current_price:.2f}")
 
-with st.expander(f"Latest News for {TICKER}"):
+# REVISED: Display the top news story with its summary
+st.subheader("Market Headlines")
+with st.container(border=True):
     news = get_stock_news(TICKER)
     if news:
-        # FIXED: Use .get() to safely access dictionary keys and avoid KeyErrors
-        for i, article in enumerate(news[:5]):
-            title = article.get('title', 'No Title Available')
-            link = article.get('link', '#')
-            publisher = article.get('publisher', 'Unknown Publisher')
-            st.markdown(f"**[{title}]({link})** - *{publisher}*")
-            if i < 4: st.markdown("---")
+        top_story = news[0]
+        title = top_story.get('title', 'No Title Available')
+        publisher = top_story.get('publisher', 'Unknown Publisher')
+        link = top_story.get('link', '#')
+        summary = top_story.get('summary', 'No summary available.')
+        
+        st.markdown(f"**[{title}]({link})** - *{publisher}*")
+        st.write(summary)
     else:
         st.write("No news found.")
 
@@ -240,19 +245,19 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
 
         st.subheader("Visualizations")
         fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, ROLL_TO_EXPIRATION)
-        st.plotly_chart(fig_stock_price, use_container_width=True)
-
-        days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
-        forecast_path_current = forecast_path[:days_current_exp]
-        
-        fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-        st.plotly_chart(fig_option_value, use_container_width=True)
-        
-        fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-        st.plotly_chart(fig_dynamic_theta, use_container_width=True)
-        
-        fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, current_price, RISK_FREE_RATE, Q)
-        st.plotly_chart(fig_static_theta, use_container_width=True)
+        if fig_stock_price:
+            st.plotly_chart(fig_stock_price, use_container_width=True)
+            days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
+            forecast_path_current = forecast_path[:days_current_exp]
+            
+            fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+            st.plotly_chart(fig_option_value, use_container_width=True)
+            
+            fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+            st.plotly_chart(fig_dynamic_theta, use_container_width=True)
+            
+            fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, current_price, RISK_FREE_RATE, Q)
+            st.plotly_chart(fig_static_theta, use_container_width=True)
         
     except Exception as e:
         st.error(f"An error occurred. Please check your inputs. Error: {e}")
