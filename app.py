@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -27,6 +26,14 @@ def get_stock_fundamentals(ticker_str):
     """Fetches key fundamental metrics for a stock ticker."""
     stock = yf.Ticker(ticker_str)
     info = stock.info
+    
+    # Safely get dates and format them
+    earnings_date_ts = info.get('earningsTimestamp')
+    ex_dividend_date_ts = info.get('exDividendDate')
+    
+    earnings_date = pd.to_datetime(earnings_date_ts, unit='s').strftime('%Y-%m-%d') if earnings_date_ts else 'N/A'
+    ex_dividend_date = pd.to_datetime(ex_dividend_date_ts, unit='s').strftime('%Y-%m-%d') if ex_dividend_date_ts else 'N/A'
+
     metrics = {
         'Company Name': info.get('shortName', 'N/A'),
         'Market Cap': info.get('marketCap', 'N/A'),
@@ -35,7 +42,9 @@ def get_stock_fundamentals(ticker_str):
         'Forward P/E': info.get('forwardPE', 'N/A'),
         'Price to Book': info.get('priceToBook', 'N/A'),
         'Dividend Yield': info.get('dividendYield', 'N/A'),
-        'Beta': info.get('beta', 'N/A')
+        'Beta': info.get('beta', 'N/A'),
+        'Earnings Date': earnings_date,
+        'Ex-Dividend Date': ex_dividend_date,
     }
     # Format large numbers into billions for readability
     for key in ['Market Cap', 'Enterprise Value']:
@@ -170,17 +179,30 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
+# MODIFIED FUNCTION TO ADD LINES
 @st.cache_data
-def plot_projected_stock_price(ticker, expiration_date):
-    """Plots historical price and the Holt/GARCH forecast."""
+def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, strike_price):
+    """Plots historical price and the Holt/GARCH forecast with key levels."""
     today = pd.Timestamp.now()
-    days_to_project = (pd.to_datetime(expiration_date) - today).days
+    days_to_project = (pd.to_datetime(roll_to_expiration) - today).days
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
+    
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist.index, y=hist, mode='lines', name='Historical Price', line=dict(color='royalblue')))
     fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name="Holt's Trend Forecast", line=dict(color='darkorange')))
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
+    
+    # Add vertical lines for expiration dates
+    fig.add_vline(x=pd.to_datetime(current_expiration), line_width=2, line_dash="dash", line_color="green",
+                  annotation_text="Current Exp", annotation_position="top right")
+    fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_width=2, line_dash="dash", line_color="red",
+                  annotation_text="Roll-to Exp", annotation_position="top right")
+
+    # Add horizontal line for strike price
+    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple",
+                  annotation_text=f"Strike ${strike_price}", annotation_position="bottom right")
+
     fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
                       xaxis_title='Date', yaxis_title='Stock Price ($)',
                       template='plotly_white', legend=dict(x=0.01, y=0.98))
@@ -189,10 +211,21 @@ def plot_projected_stock_price(ticker, expiration_date):
 # --- Sidebar for User Inputs ---
 st.sidebar.header("Your Option Position")
 TICKER = st.sidebar.text_input("Ticker", "BABA").upper()
+
+# --- Fetch default dividend yield for the sidebar ---
+try:
+    ticker_info = yf.Ticker(TICKER).info
+    # yfinance provides yield as a float (e.g., 0.02 for 2%)
+    default_div_yield = ticker_info.get('dividendYield', 0.0)
+    if default_div_yield is None:  # Handle case where yield is None
+        default_div_yield = 0.0
+except Exception:
+    default_div_yield = 0.0 # Default if ticker is invalid or API fails
+
 CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2025-12-19")
 CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=220, step=1)
 ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-02-20")
-Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=0.0, format="%.4f")
+Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=float(default_div_yield), format="%.4f")
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.04 for 4%)", value=0.042, format="%.3f")
 
 st.sidebar.button("Update and Analyze")
@@ -216,8 +249,8 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         st.dataframe(df_fundamentals)
 
         st.subheader("Visualizations")
-        # Forecast now extends to the rolled position's maturity
-        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, ROLL_TO_EXPIRATION)
+        # Forecast now extends to the rolled position's maturity and includes lines
+        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION, ROLL_TO_EXPIRATION, CURRENT_STRIKE)
         st.plotly_chart(fig_stock_price, use_container_width=True)
 
         # Slice the forecast path for simulations of the current option
