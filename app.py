@@ -22,10 +22,7 @@ def get_basic_info(ticker):
     stock_info = yf.Ticker(ticker).info
     price = stock_info.get('currentPrice', 0)
     raw_div_yield = stock_info.get('dividendYield', 0.0)
-    
-    # FIX: Divide by 100 to correct the fetched dividend yield value
     div_yield = raw_div_yield / 100.0 if raw_div_yield is not None else 0.0
-    
     return price, div_yield
 
 @st.cache_data
@@ -65,8 +62,11 @@ def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
     hist = yf.Ticker(ticker).history(period='1y')['Close']
     
-    # FIX: Set a consistent daily frequency to prevent Timestamp errors
-    hist = hist.asfreq('D').fillna(method='ffill')
+    # FIX for Timestamp error: Make the index timezone-naive before setting frequency
+    hist.index = hist.index.tz_localize(None)
+    
+    # FIX for FutureWarning: Use .ffill() instead of .fillna(method='ffill')
+    hist = hist.asfreq('D').ffill()
     
     holt_model = Holt(hist, initialization_method="estimated").fit()
     forecast = holt_model.forecast(days_to_project)
