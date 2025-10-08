@@ -5,7 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from py_vollib.black_scholes_merton import black_scholes_merton
 from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, vega
-from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.api import Holt
 from arch import arch_model
 
 # --- App Configuration ---
@@ -66,14 +66,10 @@ def get_stock_fundamentals(ticker_str):
 
 @st.cache_data
 def forecast_stock_price(ticker, days_to_project):
-    """Forecasts stock price trend with an ARIMA model and volatility with GARCH."""
+    """Forecasts stock price trend with Holt's model and volatility with GARCH."""
     hist = yf.Ticker(ticker).history(period='2y')['Close']
-    
-    # Use ARIMA model with a more general (1, 1, 1) order
-    arima_model = ARIMA(hist, order=(1, 1, 1))
-    arima_result = arima_model.fit()
-    forecast = arima_result.forecast(steps=days_to_project)
-    
+    holt_model = Holt(hist, initialization_method="estimated").fit()
+    forecast = holt_model.forecast(days_to_project)
     returns = hist.pct_change().dropna() * 100
     garch_model = arch_model(returns, vol='Garch', p=1, q=1).fit(disp='off')
     garch_forecasts = garch_model.forecast(horizon=days_to_project)
@@ -186,22 +182,28 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
 # MODIFIED FUNCTION TO ADD LINES
 @st.cache_data
 def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, strike_price):
-    """Plots historical price and the ARIMA/GARCH forecast with key levels."""
+    """Plots historical price and the Holt/GARCH forecast with key levels."""
     today = pd.Timestamp.now()
     days_to_project = (pd.to_datetime(roll_to_expiration) - today).days
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
     
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist.index, y=hist, mode='lines', name='Historical Price', line=dict(color='royalblue')))
-    fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name="ARIMA Trend Forecast", line=dict(color='darkorange')))
+    fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name="Holt's Trend Forecast", line=dict(color='darkorange')))
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
     
-    # Add horizontal line for strike price
-    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple",
-                  annotation_text=f"Strike ${strike_price}", annotation_position="bottom right")
+    # # Add vertical lines for expiration dates
+    # fig.add_vline(x=pd.to_datetime(current_expiration).to_pydatetime(), line_width=2, line_dash="dash", line_color="green",
+    #               annotation_text="Current Exp", annotation_position="top right")
 
-    fig.update_layout(title=f'<b>{ticker} Price Forecast with ARIMA Trend and GARCH Volatility</b>',
+    # fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_width=2, line_dash="dash", line_color="red",
+    #               annotation_text="Roll-to Exp", annotation_position="top right")
+
+    # Add horizontal line for strike price
+    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple")
+
+    fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
                       xaxis_title='Date', yaxis_title='Stock Price ($)',
                       template='plotly_white', legend=dict(x=0.01, y=0.98))
     return fig, forecast
@@ -214,7 +216,7 @@ TICKER = st.sidebar.text_input("Ticker", "BABA").upper()
 try:
     ticker_info = yf.Ticker(TICKER).info
     # yfinance provides yield as a float (e.g., 0.02 for 2%)
-    default_div_yield = ticker_info.get('dividendYield', 0.0)
+    default_div_yield = ticker_info.get('dividendYield', 0.0)/100
     if default_div_yield is None:  # Handle case where yield is None
         default_div_yield = 0.0
 except Exception:
@@ -267,4 +269,3 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         
     except Exception as e:
         st.error(f"An error occurred. Please check your inputs. Error: {e}")
-
