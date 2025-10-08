@@ -21,7 +21,11 @@ def get_basic_info(ticker):
     """Fetches minimal info needed for sidebar defaults."""
     stock_info = yf.Ticker(ticker).info
     price = stock_info.get('currentPrice', 0)
-    div_yield = stock_info.get('dividendYield', 0.0)
+    raw_div_yield = stock_info.get('dividendYield', 0.0)
+    
+    # FIX: Divide by 100 to correct the fetched dividend yield value
+    div_yield = raw_div_yield / 100.0 if raw_div_yield is not None else 0.0
+    
     return price, div_yield
 
 @st.cache_data
@@ -60,7 +64,9 @@ def get_stock_fundamentals(ticker_str):
 def forecast_stock_price(ticker, days_to_project):
     """Forecasts stock price trend with Holt's model and volatility with GARCH."""
     hist = yf.Ticker(ticker).history(period='1y')['Close']
-    hist = hist.asfreq('B').fillna(method='ffill')
+    
+    # FIX: Set a consistent daily frequency to prevent Timestamp errors
+    hist = hist.asfreq('D').fillna(method='ffill')
     
     holt_model = Holt(hist, initialization_method="estimated").fit()
     forecast = holt_model.forecast(days_to_project)
@@ -208,7 +214,6 @@ CURRENT_EXPIRATION = st.sidebar.text_input("Current Expiration (YYYY-MM-DD)", "2
 CURRENT_STRIKE = st.sidebar.number_input("Strike Price", value=220, step=1)
 ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2026-02-20")
 Q = st.sidebar.number_input("Dividend Yield (e.g., 0.015 for 1.5%)", value=default_div_yield, format="%.4f")
-# For transparency, show the fetched default value
 st.sidebar.caption(f"Fetched default yield: {default_div_yield:.4f}")
 
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.042 for 4.2%)", value=0.042, format="%.3f")
