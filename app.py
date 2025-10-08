@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from py_vollib.black_scholes_merton import black_scholes_merton
-from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, veга
+from py_vollib.black_scholes_merton.greeks.analytical import delta, gamma, theta, vega
 from statsmodels.tsa.api import Holt
 from arch import arch_model
 from datetime import datetime
@@ -23,12 +23,6 @@ def get_basic_info(ticker):
     price = stock_info.get('currentPrice', 0)
     div_yield = stock_info.get('dividendYield', 0.0)
     return price, div_yield
-
-@st.cache_data
-def get_stock_news(ticker):
-    """Fetches recent news headlines."""
-    news = yf.Ticker(ticker).news
-    return news
 
 @st.cache_data
 def get_stock_fundamentals(ticker_str):
@@ -177,20 +171,29 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
                       xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
+# MODIFIED: Function now accepts strike and expirations to draw lines
 @st.cache_data
-def plot_projected_stock_price(ticker, expiration_date):
-    """Plots historical price and the Holt/GARCH forecast."""
+def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, strike_price):
+    """Plots historical price and the Holt/GARCH forecast with annotations."""
     today = pd.Timestamp.now()
-    days_to_project = (pd.to_datetime(expiration_date) - today).days
+    days_to_project = (pd.to_datetime(roll_to_expiration) - today).days
     if days_to_project <= 0:
-        st.warning("Expiration date is in the past. Cannot generate forecast.")
+        st.warning("Roll-to expiration date is in the past. Cannot generate forecast.")
         return None, None
+        
     hist, forecast, upper_bound, lower_bound, future_dates = forecast_stock_price(ticker, days_to_project)
+    
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=hist.index, y=hist, mode='lines', name='Historical Price', line=dict(color='royalblue')))
     fig.add_trace(go.Scatter(x=future_dates, y=forecast, mode='lines', name="Holt's Trend Forecast", line=dict(color='darkorange')))
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
+    
+    # ADDED: Horizontal and vertical lines for context
+    fig.add_hline(y=strike_price, line_dash="dash", line_color="grey", annotation_text=f"Strike ${strike_price}", annotation_position="bottom right")
+    fig.add_vline(x=pd.to_datetime(current_expiration), line_dash="dot", line_color="green", annotation_text="Current Exp")
+    fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_dash="dot", line_color="red", annotation_text="Rolled Exp")
+
     fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
                       xaxis_title='Date', yaxis_title='Stock Price ($)',
                       template='plotly_white', legend=dict(x=0.01, y=0.98))
@@ -213,21 +216,7 @@ st.sidebar.button("Update and Analyze")
 # --- Main App Logic ---
 st.metric(f"Current {TICKER} Price", f"${current_price:.2f}")
 
-# REVISED: Display the top news story with its summary
-st.subheader("Market Headlines")
-with st.container(border=True):
-    news = get_stock_news(TICKER)
-    if news:
-        top_story = news[0]
-        title = top_story.get('title', 'No Title Available')
-        publisher = top_story.get('publisher', 'Unknown Publisher')
-        link = top_story.get('link', '#')
-        summary = top_story.get('summary', 'No summary available.')
-        
-        st.markdown(f"**[{title}]({link})** - *{publisher}*")
-        st.write(summary)
-    else:
-        st.write("No news found.")
+# REMOVED: News section is gone
 
 with st.spinner('Fetching data and running advanced models... This may take a moment.'):
     try:
@@ -244,7 +233,9 @@ with st.spinner('Fetching data and running advanced models... This may take a mo
         st.dataframe(df_fundamentals)
 
         st.subheader("Visualizations")
-        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, ROLL_TO_EXPIRATION)
+        # MODIFIED: Pass all necessary parameters to the plotting function
+        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION, ROLL_TO_EXPIRATION, CURRENT_STRIKE)
+        
         if fig_stock_price:
             st.plotly_chart(fig_stock_price, use_container_width=True)
             days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
