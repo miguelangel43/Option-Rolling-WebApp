@@ -41,7 +41,7 @@ def get_stock_fundamentals(ticker_str):
         'Trailing P/E': info.get('trailingPE', 'N/A'),
         'Forward P/E': info.get('forwardPE', 'N/A'),
         'Price to Book': info.get('priceToBook', 'N/A'),
-        'Dividend Yield': info.get('dividendYield', 'N/A')/100,
+        'Dividend Yield': info.get('dividendYield', 'N/A'), # Keep as float for formatting
         'Beta': info.get('beta', 'N/A'),
         'Earnings Date': earnings_date,
         'Ex-Dividend Date': ex_dividend_date,
@@ -119,8 +119,8 @@ def plot_theta_decay(ticker, expiration_date, strike_price, stock_price, risk_fr
     thetas = [theta('c', stock_price, strike_price, t, risk_free_rate, iv, q) / 365 for t in time_to_exp]
     fig = go.Figure(data=go.Scatter(x=-days_remaining, y=thetas, mode='lines', line=dict(color='red')))
     fig.update_layout(title=f'<b>Static Theta Decay Curve for Current Option</b><br>(Assuming Constant Price and IV)',
-                      xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
-                      xaxis=dict(autorange="reversed"), template='plotly_white')
+                          xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
+                          xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
 # NEW DYNAMIC THETA PLOT
@@ -149,8 +149,8 @@ def plot_dynamic_theta_decay(ticker, expiration_date, strike_price, risk_free_ra
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_thetas, mode='lines', name='Projected Theta', line=dict(color='purple')))
     fig.update_layout(title=f'<b>Dynamic Theta Decay along Forecasted Path</b><br>(For Current Option)',
-                      xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
-                      xaxis=dict(autorange="reversed"), template='plotly_white')
+                          xaxis_title='Days Until Expiration', yaxis_title='Daily Theta ($)',
+                          xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
 
@@ -175,8 +175,8 @@ def simulate_option_value_with_forecast(ticker, expiration_date, strike_price, r
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=-np.array(sim_days), y=sim_option_values, mode='lines', name='Projected Option Value', line=dict(color='blue')))
     fig.update_layout(title=f'<b>Projected Option Value based on Trend Forecast</b>',
-                      xaxis_title='Days Until Expiration', yaxis_title='Option Price ($)',
-                      xaxis=dict(autorange="reversed"), template='plotly_white')
+                          xaxis_title='Days Until Expiration', yaxis_title='Option Price ($)',
+                          xaxis=dict(autorange="reversed"), template='plotly_white')
     return fig
 
 # MODIFIED FUNCTION TO ADD LINES
@@ -193,19 +193,12 @@ def plot_projected_stock_price(ticker, current_expiration, roll_to_expiration, s
     fig.add_trace(go.Scatter(x=future_dates, y=upper_bound, mode='lines', line=dict(width=0), showlegend=False))
     fig.add_trace(go.Scatter(x=future_dates, y=lower_bound, mode='lines', line=dict(width=0), name='GARCH Volatility Cone', fill='tonexty', fillcolor='rgba(255,165,0,0.2)'))
     
-    # # Add vertical lines for expiration dates
-    # fig.add_vline(x=pd.to_datetime(current_expiration).to_pydatetime(), line_width=2, line_dash="dash", line_color="green",
-    #               annotation_text="Current Exp", annotation_position="top right")
-
-    # fig.add_vline(x=pd.to_datetime(roll_to_expiration), line_width=2, line_dash="dash", line_color="red",
-    #               annotation_text="Roll-to Exp", annotation_position="top right")
-
     # Add horizontal line for strike price
-    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple")
+    fig.add_hline(y=strike_price, line_width=2, line_dash="dash", line_color="purple", annotation_text="Strike Price", annotation_position="bottom right")
 
     fig.update_layout(title=f'<b>{ticker} Price Forecast with Holt Trend and GARCH Volatility</b>',
-                      xaxis_title='Date', yaxis_title='Stock Price ($)',
-                      template='plotly_white', legend=dict(x=0.01, y=0.98))
+                          xaxis_title='Date', yaxis_title='Stock Price ($)',
+                          template='plotly_white', legend=dict(x=0.01, y=0.98))
     return fig, forecast
 
 # --- Sidebar for User Inputs ---
@@ -216,7 +209,7 @@ TICKER = st.sidebar.text_input("Ticker", "BABA").upper()
 try:
     ticker_info = yf.Ticker(TICKER).info
     # yfinance provides yield as a float (e.g., 0.02 for 2%)
-    default_div_yield = ticker_info.get('dividendYield', 0.0)/100
+    default_div_yield = ticker_info.get('dividendYield', 0.0) 
     if default_div_yield is None:  # Handle case where yield is None
         default_div_yield = 0.0
 except Exception:
@@ -228,44 +221,37 @@ ROLL_TO_EXPIRATION = st.sidebar.text_input("Roll to Expiration (YYYY-MM-DD)", "2
 Q = st.sidebar.number_input("Dividend Yield (e.g., 0.01 for 1%)", value=float(default_div_yield), format="%.4f")
 RISK_FREE_RATE = st.sidebar.number_input("Risk-Free Rate (e.g., 0.04 for 4%)", value=0.042, format="%.3f")
 
-st.sidebar.button("Update and Analyze")
+if st.sidebar.button("Update and Analyze"):
 
-# --- Main App Logic ---
-with st.spinner('Fetching data and running advanced models... This may take a moment.'):
-    try:
-        S = get_stock_price(TICKER)
-        st.metric(f"Current {TICKER} Price", f"${S:.2f}")
+    # --- Main App Logic ---
+    with st.spinner('Fetching data and running advanced models... This may take a moment.'):
+        try:
+            S = get_stock_price(TICKER)
+            st.metric(f"Current {TICKER} Price", f"${S:.2f}")
 
-        st.subheader("Greeks Comparison")
-        current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
-        roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
-        if current_option_stats and roll_to_option_stats:
-            df_compare = pd.DataFrame([current_option_stats, roll_to_option_stats])
-            df_compare.index = ['Current Position', 'Rolled Position']
-            st.dataframe(df_compare.round(4))
+            st.subheader("Greeks Comparison")
+            current_option_stats = analyze_option(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+            roll_to_option_stats = analyze_option(TICKER, ROLL_TO_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
+            if current_option_stats and roll_to_option_stats:
+                df_compare = pd.DataFrame([current_option_stats, roll_to_option_stats])
+                df_compare.index = ['Current Position', 'Rolled Position']
+                st.dataframe(df_compare.round(4))
 
-        st.subheader(f"Fundamental Metrics for {TICKER}")
-        df_fundamentals = get_stock_fundamentals(TICKER)
-        st.dataframe(df_fundamentals)
+            st.subheader(f"Fundamental Metrics for {TICKER}")
+            df_fundamentals = get_stock_fundamentals(TICKER)
+            st.dataframe(df_fundamentals)
 
-        st.subheader("Visualizations")
-        # Forecast now extends to the rolled position's maturity and includes lines
-        fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION, ROLL_TO_EXPIRATION, CURRENT_STRIKE)
-        st.plotly_chart(fig_stock_price, use_container_width=True)
+            st.subheader("Visualizations")
+            # Forecast now extends to the rolled position's maturity and includes lines
+            fig_stock_price, forecast_path = plot_projected_stock_price(TICKER, CURRENT_EXPIRATION, ROLL_TO_EXPIRATION, CURRENT_STRIKE)
+            st.plotly_chart(fig_stock_price, use_container_width=True)
 
-        # Slice the forecast path for simulations of the current option
-        days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
-        forecast_path_current = forecast_path[:days_current_exp]
-        
-        fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-        st.plotly_chart(fig_option_value, use_container_width=True)
-        
-        # Display the new dynamic theta plot
-        fig_dynamic_theta = plot_dynamic_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
-        st.plotly_chart(fig_dynamic_theta, use_container_width=True)
-        
-        fig_static_theta = plot_theta_decay(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, S, RISK_FREE_RATE, Q)
-        st.plotly_chart(fig_static_theta, use_container_width=True)
-        
-    except Exception as e:
-        st.error(f"An error occurred. Please check your inputs. Error: {e}")
+            # Slice the forecast path for simulations of the current option
+            days_current_exp = (pd.to_datetime(CURRENT_EXPIRATION) - pd.Timestamp.now()).days
+            forecast_path_current = forecast_path[:days_current_exp]
+            
+            fig_option_value = simulate_option_value_with_forecast(TICKER, CURRENT_EXPIRATION, CURRENT_STRIKE, RISK_FREE_RATE, Q, forecast_path_current)
+            st.plotly_chart(fig_option_value, use_container_width=True)
+            
+            # --- Create columns for side-by-side Theta plots ---
+            col1, col2
